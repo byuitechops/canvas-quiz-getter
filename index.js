@@ -3,15 +3,15 @@ const d3 = require('d3-dsv')
 const fs = require('fs');
 
 async function getAllQuizzes(course) {
-    let assignments = await canvas.get(`/api/v1/courses/${course.id}/quizzes`);
+    let quizzes = await canvas.get(`/api/v1/courses/${course.id}/quizzes`);
     console.log(`Got quizzes for ${course.name}`);
 
-    let returnObjs = assignments.map(assignment => {
+    let returnObjs = quizzes.map(quiz => {
         return {
             'Course Name': course.name,
             'Course ID': course.id,
-            'Assignment Name': assignment.name,
-            'Link to Assignment': assignment.html_url,
+            'Quiz Name': quiz.name,
+            'Link to Quiz': quiz.html_url,
         }
     });
     return returnObjs;
@@ -48,7 +48,7 @@ async function main() {
     }
     console.log('Formating csv');
     /* Format and create the CSV file with the log data */
-    var csvData = d3.csvFormat(assignments, ["Course Name", "Course ID", "Assignment Name", "Link to Assignment"]);
+    var csvData = d3.csvFormat(assignments, ["Course Name", "Course ID", "Quiz Name", "Link to Quiz"]);
     console.log(csvData);
     
     // write it all to a file
