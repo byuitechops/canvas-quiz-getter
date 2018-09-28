@@ -1,27 +1,88 @@
 const canvas = require('canvas-api-wrapper');
 const d3 = require('d3-dsv')
 const fs = require('fs');
+const path = require('path');
 
 async function getAllQuizzes(course) {
     let quizzes = await canvas.get(`/api/v1/courses/${course.id}/quizzes`);
     console.log(`Got quizzes for ${course.name}`);
+    return quizzes;
+}
+async function fixQuizzes(course, quizzes) {
 
-    let returnObjs = quizzes.map(quiz => {
-        return {
-            'Course Name': course.name,
-            'Course ID': course.id,
-            'Quiz Name': quiz.name,
-            'Link to Quiz': quiz.html_url,
+    let quizzesToChange = [{
+        oldTitle: 'W03 _ActivityType_: Mid-Semester Instructor Feedback',
+        newTitle: 'W03 Student Feedback to Instructor'
+    }, {
+        oldTitle: 'W03 Quiz: Mid-Semester Instructor Feedback',
+        newTitle: 'W03 Student Feedback to Instructor'
+    }, {
+        oldTitle: 'W05 _ActivityType_: Mid-Semester Instructor Feedback',
+        newTitle: 'W05 Student Feedback to Instructor'
+    }, {
+        oldTitle: 'W05 ActivityType_: Mid-Semester Instructor Feedback',
+        newTitle: 'W05 Student Feedback to Instructor'
+    }, {
+        oldTitle: 'W05 Feedback: Mid-Semester Instructor',
+        newTitle: 'W05 Student Feedback to Instructor'
+    }, {
+        oldTitle: 'W05 Quiz: Mid-Semester Instructor Feedback',
+        newTitle: 'W05 Student Feedback to Instructor'
+    }, {
+        oldTitle: 'W05 Mid-Semester Instructor Feedback',
+        newTitle: 'W05 Student Feedback to Instructor'
+    }, {
+        oldTitle: 'W12 End-of-Semester Instructor Feedback',
+        newTitle: 'W12 Student Evaluation of Instructor'
+    }, {
+        oldTitle: '12 End-of-Semester Instructor Feedback',
+        newTitle: 'W12 Student Evaluation of Instructor'
+    }];
+
+    let quizLogs = [];
+    for (let i = 0; i < quizzesToChange.length; i++) {
+        // find the old quizzes
+        let found = quizzes.filter(quiz => quiz.title === quizzesToChange[i].oldTitle);
+
+        // if any old quizzes were found
+        if (found.length > 0) {
+            // catch the errors
+            let errors = [];
+            if (found.length > 1) {
+                errors.push(`More than one ${quizzesToChange[i].oldTitle} found`);
+                console.error(`More than one ${quizzesToChange[i].oldTitle} found`);
+            }
+
+            // change the titles in canvas
+            let updatedQuiz;
+            if (found.length > 0) {
+                updatedQuiz = await canvas.put(`/api/v1/courses/${course.id}/quizzes/${found[0].id}`, {
+                    'quiz[title]': quizzesToChange[i].newTitle
+                });
+                console.log(`Changed ${course.id} ${quizzesToChange[i].oldTitle} name to ${quizzesToChange[i].newTitle}`);
+            }
+
+            // return the log for the csv
+            quizLogs.push({
+                'Course Name': course.name,
+                'Course ID': course.id,
+                'Old Name': found[0].title,
+                'New Name': updatedQuiz.title,
+                'New Link': updatedQuiz.html_url,
+                'Errors': JSON.stringify(errors)
+            });
         }
-    });
-    return returnObjs;
+    }
+
+    return quizLogs;
 }
 
-async function getAllCourses() {
+async function getAllCourses(userInput) {
     // get all courses from the Master Courses subaccount (i.e. 42)
-    let courses = await canvas.get(`/api/v1/accounts/42/courses`, {
+    let courses = await canvas.get(`/api/v1/accounts/${userInput.subaccount}/courses`, {
         sort: 'course_name',
-        'include[]': 'subaccount'
+        'include[]': 'subaccount',
+        // search_term: 'seth childers'
     });
 
     // sort them alphabetically so I know where in the list the tool is at when running
@@ -33,27 +94,46 @@ async function getAllCourses() {
 
     // although we got everything under account 42, not
     // everything belongs to it since there are subaccounts
-    courses = courses.filter(course => course.account_id === 42)
+    if (userInput.includeNestedAccounts === true) {
+        courses = courses.filter(course => course.account_id === userInput.subaccount);
+    }
     return courses;
 }
 
-async function main() {
+async function main(userInput) {
+    // Pathway is not a subdomain
+    canvas.subdomain = userInput.domain;
+
     // get all the courses
-    let courses = await getAllCourses();
+    let courses = await getAllCourses(userInput);
     // get the assignments for each course
-    let assignments = [];
+    let quizLogs = [];
     for (let i = 0; i < courses.length; i++) {
-        let logItem = await getAllQuizzes(courses[i]);
-        assignments = assignments.concat(logItem);
+        let quizzes = await getAllQuizzes(courses[i]);
+        let logItem = await fixQuizzes(courses[i], quizzes);
+        quizLogs = quizLogs.concat(logItem);
     }
-    console.log('Formating csv');
+
     /* Format and create the CSV file with the log data */
-    var csvData = d3.csvFormat(assignments, ["Course Name", "Course ID", "Quiz Name", "Link to Quiz"]);
-    console.log(csvData);
-    
+    console.log('Formating csv');
+    var csvData = d3.csvFormat(quizLogs, [
+        "Course Name",
+        "Course ID",
+        "Old Name",
+        "New Name",
+        "New Link",
+        "Errors"
+    ]);
+
+    // if the specified path doesn't exist, make it
+    if (!fs.existsSync(path.resolve(userInput.saveDirectory))) {
+        fs.mkdirSync(path.resolve(userInput.saveDirectory));
+    }
     // write it all to a file
     console.log('Writing File');
-    fs.writeFileSync('Canvas-Master-Course-Quizzes.csv', csvData);
+    fs.writeFileSync(path.resolve(userInput.saveDirectory, 'changeLog.csv'), csvData);
 }
 
-main();
+module.exports = {
+    main
+};
